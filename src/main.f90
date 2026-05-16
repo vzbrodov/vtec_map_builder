@@ -1,4 +1,10 @@
 program build_vtec_maps
+  ! Главная программа намеренно оставлена тонкой:
+  ! 1) прочитать параметры запуска;
+  ! 2) загрузить наблюдения;
+  ! 3) найти коэффициенты сферических гармоник;
+  ! 4) посчитать карту на сетке;
+  ! 5) записать CSV-результаты.
   use my_prec, only: mp
   use station_data_mod, only: observation_set
   use data_io_mod, only: load_observations, write_coefficients, write_grid
@@ -12,16 +18,20 @@ program build_vtec_maps
   integer :: doy, year, lmax
   real(mp) :: ridge, lat_step, lon_step, weight_radius_deg
 
+  ! Параметры можно передать через командную строку; если их нет, берутся значения ниже.
   call read_options(data_dir, coords_file, output_dir, doy, year, lmax, ridge, lat_step, lon_step, weight_radius_deg)
   call execute_command_line('mkdir -p ' // trim(output_dir))
 
+  ! Загружаем VTEC и координаты станций.
   call load_observations(trim(data_dir), doy, year, trim(coords_file), obs)
   if (obs%nstations == 0 .or. obs%ntimes == 0) error stop 'No VTEC observations were loaded'
 
+  ! Основной расчет: коэффициенты по эпохам и значения карты на регулярной сетке.
   call fit_vtec_series(obs, lmax, ridge, weight_radius_deg, coeffs, residual_rms, nused)
   call make_latlon_grid(lat_step, lon_step, lat_grid, lon_grid)
   call evaluate_maps(lmax, coeffs, lat_grid, lon_grid, maps)
 
+  ! Результаты пишутся в CSV, чтобы их легко читать Python-скриптами.
   call write_coefficients(trim(output_dir) // '/coefficients.csv', obs%times, lmax, coeffs)
   call write_grid(trim(output_dir) // '/vtec_grid.csv', obs%times, lat_grid, lon_grid, maps)
   call write_diagnostics(trim(output_dir) // '/fit_diagnostics.csv', obs%times, nused, residual_rms)
@@ -37,11 +47,15 @@ program build_vtec_maps
 contains
 
   subroutine read_options(data_dir, coords_file, output_dir, doy, year, lmax, ridge, lat_step, lon_step, weight_radius_deg)
+    ! Читает до 10 позиционных аргументов:
+    ! data_dir coords_file output_dir doy year lmax lat_step lon_step ridge weight_radius_deg.
+    ! Это простой интерфейс без внешних зависимостей и конфигурационных файлов.
     character(len=*), intent(out) :: data_dir, coords_file, output_dir
     integer, intent(out) :: doy, year, lmax
     real(mp), intent(out) :: ridge, lat_step, lon_step, weight_radius_deg
     character(len=256) :: arg
 
+    ! Значения по умолчанию удобны для быстрого тестового запуска.
     data_dir = '2023'
     coords_file = 'station_coordinates_from_tec.csv'
     output_dir = 'output'
@@ -76,6 +90,8 @@ contains
   end subroutine read_options
 
   subroutine write_diagnostics(filename, times, nused, residual_rms)
+    ! Диагностика по эпохам: сколько станций использовано и RMS невязки.
+    ! По этому файлу удобно сравнивать варианты lmax/ridge.
     character(len=*), intent(in) :: filename
     real(mp), intent(in) :: times(:), residual_rms(:)
     integer, intent(in) :: nused(:)

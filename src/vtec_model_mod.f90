@@ -1,4 +1,8 @@
 module vtec_model_mod
+  ! Высокоуровневые процедуры моделирования VTEC:
+  ! - подгонка коэффициентов сферических гармоник для каждой эпохи;
+  ! - регуляризация высоких степеней;
+  ! - расчет карты на регулярной широтно-долготной сетке.
   use my_prec, only: mp
   use station_data_mod, only: observation_set
   use spherical_harmonics_mod, only: n_sph_coeff, real_sph_basis, evaluate_sph, pi
@@ -8,6 +12,11 @@ module vtec_model_mod
 contains
 
   subroutine fit_vtec_series(obs, lmax, ridge, weight_radius_deg, coeffs, residual_rms, nused)
+    ! Для каждой эпохи независимо строит МНК-систему по всем доступным станциям.
+    ! На выходе coeffs(:,it) - коэффициенты карты для времени obs%times(it).
+    !
+    ! ridge управляет гладкостью: чем больше, тем сильнее подавляются высокие степени.
+    ! weight_radius_deg > 0 включает плотностные веса станций; 0 оставляет равные веса.
     type(observation_set), intent(in) :: obs
     integer, intent(in) :: lmax
     real(mp), intent(in) :: ridge, weight_radius_deg
@@ -25,10 +34,13 @@ contains
     coeffs = 0.0_mp
     residual_rms = -1.0_mp
     nused = 0
+    ! Веса станций не зависят от времени, поэтому считаются один раз.
     call compute_density_weights(obs, weight_radius_deg, station_weights)
+    ! Диагональ регуляризации тоже одинакова для всех эпох.
     call make_degree_damping(lmax, ridge, ridge_diag)
 
     do it = 1, obs%ntimes
+      ! Собираем матрицу A и вектор y только из станций, у которых есть VTEC в эту эпоху.
       iobs = 0
       do is = 1, obs%nstations
         if (.not. obs%has_value(is, it)) cycle
@@ -40,6 +52,7 @@ contains
       end do
 
       nused(it) = iobs
+      ! Если наблюдений меньше коэффициентов, обычная МНК-задача недоопределена.
       if (iobs < ncoef) cycle
 
       call weighted_least_squares(a(:iobs, :), y(:iobs), w(:iobs), ridge_diag, coeff, ok)
@@ -50,6 +63,9 @@ contains
   end subroutine fit_vtec_series
 
   subroutine make_degree_damping(lmax, ridge, ridge_diag)
+    ! Формирует регуляризацию по степени l.
+    ! Штраф растет как [l(l+1)]^2, поэтому низкие глобальные формы почти свободны,
+    ! а мелкомасштабные осцилляции высоких l подавляются сильнее.
     integer, intent(in) :: lmax
     real(mp), intent(in) :: ridge
     real(mp), intent(out) :: ridge_diag(:)
@@ -73,6 +89,10 @@ contains
   end subroutine make_degree_damping
 
   subroutine compute_density_weights(obs, radius_deg, weights)
+    ! Опциональные веса по плотности сети.
+    ! Если radius_deg <= 0, все веса равны 1.
+    ! Если включить, станции в плотном кластере получают меньший вес.
+    ! В текущих экспериментах основной режим - radius_deg = 0, без разреживания сети.
     type(observation_set), intent(in) :: obs
     real(mp), intent(in) :: radius_deg
     real(mp), intent(out) :: weights(:)
@@ -93,11 +113,13 @@ contains
       weights(i) = 1.0_mp / max(density, tiny(1.0_mp))
     end do
 
+    ! Нормируем веса так, чтобы средний вес оставался около 1.
     total_weight = sum(weights)
     if (total_weight > 0.0_mp) weights = weights * real(obs%nstations, mp) / total_weight
   end subroutine compute_density_weights
 
   function angular_distance_rad(lat1_deg, lon1_deg, lat2_deg, lon2_deg) result(distance)
+    ! Сферическое угловое расстояние между двумя точками в радианах.
     real(mp), intent(in) :: lat1_deg, lon1_deg, lat2_deg, lon2_deg
     real(mp) :: distance
     real(mp) :: lat1, lat2, dlon, c
@@ -110,6 +132,8 @@ contains
   end function angular_distance_rad
 
   function compute_rms(a, y, coeff) result(rms)
+    ! RMS невязки на станциях для одной эпохи.
+    ! Это диагностическая величина, а не единственный критерий качества карты.
     real(mp), intent(in) :: a(:, :), y(:), coeff(:)
     real(mp) :: rms
     real(mp) :: residual
@@ -124,6 +148,7 @@ contains
   end function compute_rms
 
   subroutine make_latlon_grid(lat_step, lon_step, lat_grid, lon_grid)
+    ! Создает регулярную сетку широт [-90,90] и долгот [-180,180].
     real(mp), intent(in) :: lat_step, lon_step
     real(mp), allocatable, intent(out) :: lat_grid(:), lon_grid(:)
     integer :: nlat, nlon, i
@@ -141,6 +166,8 @@ contains
   end subroutine make_latlon_grid
 
   subroutine evaluate_maps(lmax, coeffs, lat_grid, lon_grid, maps)
+    ! Вычисляет VTEC на всей регулярной сетке для всех эпох.
+    ! maps(lon_index, lat_index, time_index) затем пишется в CSV.
     integer, intent(in) :: lmax
     real(mp), intent(in) :: coeffs(:, :), lat_grid(:), lon_grid(:)
     real(mp), allocatable, intent(out) :: maps(:, :, :)

@@ -1,10 +1,19 @@
 module least_squares_mod
+  ! Решение взвешенной задачи МНК.
+  ! Здесь формируются нормальные уравнения:
+  !   (A^T W A + R) c = A^T W y
+  ! где R - диагональная регуляризация коэффициентов.
   use my_prec, only: mp
   implicit none
 
 contains
 
   subroutine weighted_least_squares(a, y, w, ridge_diag, coeff, ok)
+    ! a          - матрица базисных функций, строки соответствуют станциям;
+    ! y          - наблюденный VTEC;
+    ! w          - веса наблюдений;
+    ! ridge_diag - диагональ регуляризации;
+    ! coeff      - найденные коэффициенты разложения.
     real(mp), intent(in) :: a(:, :), y(:), w(:), ridge_diag(:)
     real(mp), intent(out) :: coeff(:)
     logical, intent(out) :: ok
@@ -17,6 +26,7 @@ contains
     normal = 0.0_mp
     rhs = 0.0_mp
 
+    ! Собираем правую часть и нормальную матрицу.
     do i = 1, nobs
       do j = 1, ncoef
         rhs(j) = rhs(j) + w(i) * a(i, j) * y(i)
@@ -26,6 +36,7 @@ contains
       end do
     end do
 
+    ! Регуляризация добавляется только на диагональ нормальной матрицы.
     do j = 1, ncoef
       normal(j, j) = normal(j, j) + ridge_diag(j)
     end do
@@ -34,6 +45,8 @@ contains
   end subroutine weighted_least_squares
 
   subroutine solve_linear_system(a, b, x, ok)
+    ! Решает линейную систему методом Гаусса с частичным выбором главного элемента.
+    ! Для наших размеров этого достаточно, но для промышленного кода лучше LAPACK.
     real(mp), intent(inout) :: a(:, :)
     real(mp), intent(inout) :: b(:)
     real(mp), intent(out) :: x(:)
@@ -44,6 +57,7 @@ contains
     n = size(b)
     ok = .true.
 
+    ! Прямой ход: зануляем элементы ниже диагонали.
     do k = 1, n - 1
       pivot = k
       pivot_abs = abs(a(k, k))
@@ -53,6 +67,7 @@ contains
           pivot = i
         end if
       end do
+      ! Если опорный элемент почти нулевой, система плохо обусловлена или вырождена.
       if (pivot_abs <= tiny(1.0_mp)) then
         ok = .false.
         x = 0.0_mp
@@ -75,6 +90,7 @@ contains
       return
     end if
 
+    ! Обратный ход.
     do i = n, 1, -1
       tmp = b(i)
       do j = i + 1, n
@@ -85,6 +101,7 @@ contains
   end subroutine solve_linear_system
 
   subroutine swap_rows(a, b, i, j)
+    ! Меняет местами строки матрицы и соответствующие элементы правой части.
     real(mp), intent(inout) :: a(:, :), b(:)
     integer, intent(in) :: i, j
     real(mp) :: tmp
