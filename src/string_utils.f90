@@ -1,9 +1,12 @@
 module string_utils
+  ! Небольшие строковые функции, чтобы не размазывать обработку имен станций
+  ! и CSV-строк по модулям ввода-вывода.
   implicit none
 
 contains
 
   pure function lower_string(text) result(out)
+    ! Возвращает строку в нижнем регистре. Используется для путей вида 2023/01kr.
     character(len=*), intent(in) :: text
     character(len=len(text)) :: out
     integer :: i, c
@@ -16,6 +19,7 @@ contains
   end function lower_string
 
   pure function upper_string(text) result(out)
+    ! Возвращает строку в верхнем регистре. Используется для сравнения кодов станций.
     character(len=*), intent(in) :: text
     character(len=len(text)) :: out
     integer :: i, c
@@ -28,6 +32,7 @@ contains
   end function upper_string
 
   pure function replace_char(text, old_char, new_char) result(out)
+    ! Простая замена символов. Нужна для чтения CSV через обычный list-directed read.
     character(len=*), intent(in) :: text
     character(len=1), intent(in) :: old_char, new_char
     character(len=len(text)) :: out

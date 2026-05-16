@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Plot VTEC maps and optionally build a daily animation from Fortran CSV output."""
+"""Plot VTEC maps and optionally build a daily animation from Fortran CSV output.
+
+The Fortran program writes a long CSV table:
+time_ut, latitude, longitude, vtec.
+This script reshapes each epoch to a 2-D lon/lat image and saves a PNG/GIF.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +13,8 @@ import csv
 import os
 from pathlib import Path
 
+# In some sandboxed/editor environments the default matplotlib config directory is
+# not writable. Point it to /tmp so plotting works without extra setup.
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib-vtec")
 
 import matplotlib.pyplot as plt
@@ -22,6 +29,7 @@ except Exception:  # Cartopy is optional; a plain lon/lat plot still works.
 
 
 def read_grid(path: Path) -> tuple[dict[float, dict[tuple[float, float], float]], list[float], list[float], list[float]]:
+    """Read the long grid CSV into dictionaries indexed by time and grid point."""
     data: dict[float, dict[tuple[float, float], float]] = {}
     latitudes: set[float] = set()
     longitudes: set[float] = set()
@@ -41,11 +49,13 @@ def read_grid(path: Path) -> tuple[dict[float, dict[tuple[float, float], float]]
 
 
 def frame_to_array(data, time_ut: float, latitudes: list[float], longitudes: list[float]):
+    """Convert one epoch from sparse dictionary form to a 2-D image array."""
     frame = data[time_ut]
     return [[frame.get((lat, lon), float("nan")) for lon in longitudes] for lat in latitudes]
 
 
 def make_axes(use_cartopy: bool):
+    """Create map axes. Cartopy is used when installed; otherwise use plain lon/lat."""
     if use_cartopy:
         fig = plt.figure(figsize=(12, 6))
         ax = plt.axes(projection=ccrs.PlateCarree())
@@ -62,6 +72,7 @@ def make_axes(use_cartopy: bool):
 
 
 def plot_one(data, time_ut, latitudes, longitudes, output: Path, use_cartopy: bool, vmin: float | None, vmax: float | None, interpolation: str):
+    """Save one PNG map for the requested UT epoch."""
     values = frame_to_array(data, time_ut, latitudes, longitudes)
     fig, ax = make_axes(use_cartopy)
     image_args = dict(
@@ -85,6 +96,7 @@ def plot_one(data, time_ut, latitudes, longitudes, output: Path, use_cartopy: bo
 
 
 def animate(data, times, latitudes, longitudes, output: Path, use_cartopy: bool, vmin: float | None, vmax: float | None, interpolation: str):
+    """Save a GIF animation over all UT epochs."""
     fig, ax = make_axes(use_cartopy)
     first = frame_to_array(data, times[0], latitudes, longitudes)
     image_args = dict(
@@ -128,6 +140,8 @@ def main() -> None:
     args.out_dir.mkdir(parents=True, exist_ok=True)
     data, times, latitudes, longitudes = read_grid(args.grid)
     use_cartopy = ccrs is not None
+    # argparse cannot parse None directly, so "nan" is used as a small escape hatch
+    # for matplotlib autoscaling.
     vmin = None if args.vmin != args.vmin else args.vmin
     vmax = None if args.vmax != args.vmax else args.vmax
 

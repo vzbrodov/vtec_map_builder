@@ -1,4 +1,8 @@
 module data_io_mod
+  ! Ввод-вывод проекта:
+  ! 1) чтение координат станций из CSV;
+  ! 2) чтение временных рядов VTEC из файлов TayAbsTec;
+  ! 3) запись коэффициентов, карт и диагностик в CSV.
   use my_prec, only: mp
   use station_data_mod, only: station_meta, observation_set
   use string_utils, only: lower_string, upper_string, replace_char
@@ -7,6 +11,10 @@ module data_io_mod
 contains
 
   subroutine read_station_coordinates(filename, stations)
+    ! Читает station_coordinates_from_tec.csv.
+    ! Ожидаемый формат строк:
+    ! station,latitude,longitude,height_m,x_m,y_m,z_m
+    ! Для расчета карт используются только station, latitude, longitude, height_m.
     character(len=*), intent(in) :: filename
     type(station_meta), allocatable, intent(out) :: stations(:)
     character(len=512) :: line, clean
@@ -14,6 +22,7 @@ contains
     integer :: unit, ios, n, i
     real(mp) :: lat, lon, h
 
+    ! Первый проход нужен, чтобы узнать число строк и выделить массив точного размера.
     n = 0
     open(newunit=unit, file=filename, status='old', action='read', iostat=ios)
     if (ios /= 0) error stop 'Cannot open station coordinate file'
@@ -25,6 +34,7 @@ contains
     end do
     rewind(unit)
 
+    ! Второй проход заполняет массив станций.
     allocate(stations(n))
     read(unit, '(A)', iostat=ios) line
     i = 0
@@ -32,6 +42,7 @@ contains
       read(unit, '(A)', iostat=ios) line
       if (ios /= 0) exit
       if (len_trim(line) == 0) cycle
+      ! Меняем запятые на пробелы, чтобы Fortran мог прочитать строку через read(*).
       clean = replace_char(line, ',', ' ')
       read(clean, *, iostat=ios) code, lat, lon, h
       if (ios /= 0) cycle
@@ -47,6 +58,10 @@ contains
   end subroutine read_station_coordinates
 
   subroutine load_observations(data_dir, doy, year, coords_file, obs)
+    ! Собирает общий массив наблюдений по всем станциям.
+    ! Для станции CODE ищется файл:
+    !   data_dir/code_lower/code_lower_DDD_YYYY.dat
+    ! где DDD - день года. Станции без файла просто пропускаются.
     character(len=*), intent(in) :: data_dir, coords_file
     integer, intent(in) :: doy, year
     type(observation_set), intent(out) :: obs
@@ -71,6 +86,8 @@ contains
       nrows = size(tmp_times)
       if (nrows == 0) cycle
 
+      ! Временная сетка берется из первого найденного непустого файла.
+      ! Для текущих данных это 48 эпох с шагом 0.5 часа.
       if (ntimes == 0) then
         ntimes = nrows
         allocate(obs%times(ntimes))
@@ -83,6 +100,7 @@ contains
 
       nused = nused + 1
       used(nused) = all_stations(i)
+      ! Если ряд станции короче эталонного, заполняем только доступную часть.
       vtec_work(nused, 1:min(ntimes, nrows)) = tmp_vtec(1:min(ntimes, nrows))
       mask_work(nused, 1:min(ntimes, nrows)) = .true.
     end do
@@ -106,6 +124,8 @@ contains
   end subroutine load_observations
 
   function station_data_path(data_dir, station_code, doy, year) result(path)
+    ! Формирует путь к файлу VTEC для одной станции.
+    ! Пример: 2023/01kr/01kr_320_2023.dat
     character(len=*), intent(in) :: data_dir, station_code
     integer, intent(in) :: doy, year
     character(len=512) :: path
@@ -117,12 +137,16 @@ contains
   end function station_data_path
 
   subroutine read_station_vtec(filename, times, vtec)
+    ! Читает файл TayAbsTec со строками вида:
+    ! UT  I_v  G_lon  G_lat ...
+    ! Для карты используются только первые две колонки: UT и I_v.
     character(len=*), intent(in) :: filename
     real(mp), allocatable, intent(out) :: times(:), vtec(:)
     character(len=512) :: line
     integer :: unit, ios, n, i
     real(mp) :: t, val
 
+    ! Первый проход считает количество числовых строк, пропуская заголовки '#'.
     n = 0
     open(newunit=unit, file=filename, status='old', action='read', iostat=ios)
     if (ios /= 0) then
@@ -138,6 +162,7 @@ contains
     end do
     rewind(unit)
 
+    ! Второй проход реально считывает время и VTEC.
     allocate(times(n), vtec(n))
     i = 0
     do
@@ -154,6 +179,9 @@ contains
   end subroutine read_station_vtec
 
   subroutine write_coefficients(filename, times, lmax, coeffs)
+    ! Записывает коэффициенты сферических гармоник по эпохам.
+    ! Порядок коэффициентов такой же, как в spherical_harmonics_mod:
+    ! C_l_0, затем для каждого m>0 пара C_l_m, S_l_m.
     character(len=*), intent(in) :: filename
     real(mp), intent(in) :: times(:), coeffs(:, :)
     integer, intent(in) :: lmax
@@ -178,6 +206,7 @@ contains
   end subroutine write_coefficients
 
   function coeff_name(index, lmax) result(name)
+    ! Преобразует номер коэффициента в читаемое имя для заголовка CSV.
     integer, intent(in) :: index, lmax
     character(len=32) :: name
     integer :: l, m, k
@@ -206,6 +235,9 @@ contains
   end function coeff_name
 
   subroutine write_grid(filename, times, lat_grid, lon_grid, maps)
+    ! Записывает рассчитанную карту в длинном CSV-формате:
+    ! time_ut, latitude, longitude, vtec.
+    ! Такой формат проще читать Python-скриптами и внешними инструментами.
     character(len=*), intent(in) :: filename
     real(mp), intent(in) :: times(:), lat_grid(:), lon_grid(:), maps(:, :, :)
     integer :: unit, it, ilat, ilon
