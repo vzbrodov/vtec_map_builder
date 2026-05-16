@@ -1,0 +1,35 @@
+# Build artifacts
+build/
+build_vtec_maps
+*.o
+*.mod
+
+# Generated model outputs and figures
+output/
+output_*/
+*.gif
+
+# Local data archives
+2023/
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+
+# Python/cache/editor noise
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# Local Codex/agent state
+.agents/
+.codex/
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+*~
+*.swp
